@@ -244,9 +244,19 @@ class Writer(BaseWriter):
 
         # print args
         if kwargs.get('modify_value'):
-            print kwargs
-            # setattr(cell, 'value', str(kwargs.get('cell_value')))
-            value_replace = kwargs.get('cell_value')
+            value_req = kwargs.get('cell_value')
+            if isinstance(value_req, list):
+                cell_value, cell_type = value_req
+                setattr(cell, 'value', cell_value)
+                setattr(cell, 'ctype', cell_type)
+            elif isinstance(value_req,unicode):
+                setattr(cell, 'value', value_req)
+                setattr(cell, 'ctype', xlrd.XL_CELL_TEXT)
+            elif isinstance(value_req, int):
+                setattr(cell, 'value', value_req)
+                setattr(cell, 'ctype', xlrd.XL_CELL_NUMBER)
+            else:
+                raise MultipleIterationError('%s data type error' % value_req)
         # setup column attributes if not already set
         if wtcolx not in self.wtcols and rdcolx in self.rdsheet.colinfo_map:
             rdcol = self.rdsheet.colinfo_map[rdcolx]
