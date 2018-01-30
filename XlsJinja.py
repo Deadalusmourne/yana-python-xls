@@ -10,14 +10,14 @@ class XlsJinja:
     预设的jinja对象，一是保存xls中的变量和信息，二是customize的filter
     """
     def __init__(self):
-        self.status = 0      # 循环的信息 00000000 是否循环 循环几次 剩余次数 循环宽度
+        self.status = '00000000'      # 循环的信息 00000000 是否循环 循环几次 剩余次数 循环宽度
     # 匹配规则
     variable_re = re.compile('\{\{(.*)\}\}')          # 变量
     variable_escape = re.compile('__\{\{(.*)\}\}__')
     control_re = re.compile('\{%(.*)%\}')             # 控制语句
     control_escape = re.compile('__\{%(.*)%\}__')
     is_formula_re = re.compile('\+|-|\*|/|%')
-    forloop_formula = re.compile('^(?i)for\s+(\w+)\s+?in\s+(\w)')
+    forloop_formula = re.compile('^(?i)for\s+(\w+)\s+?in\s+(\w+)')
     set_re = re.compile('(\w+)\s*=\s*(\w+)')
     forloop_endfor = re.compile('^endfor')
     # 参数
@@ -74,15 +74,14 @@ class XlsJinja:
         return resp
 
     def setbit(self, offset, value):
-        a = list(bin(self.status)).reverse()
+        a = list(self.status)
         a[offset] = str(value)
-        a.reverse()
         a = ''.join(a)
-        self.status = int(a, 2)
+        self.status = a
 
     def getbit(self, offset):
-        a = list(bin(self.status)).reverse()
-        return a[offset]
+        a = list(self.status)
+        return int(a[offset])
 
     def render(self, render_vb):
         self.render_vb = render_vb
@@ -106,3 +105,10 @@ if __name__ == '__main__':
     a = XlsJinja()
     print XlsJinja.__dict__
 
+    # error处理
+    # 1 控制语句写成了{{}} 导致的报错
+    # 2 当context不存在某个循环体的时候
+
+    # 尚未处理
+    # 1 重置status
+    # 2 循环体内部处理

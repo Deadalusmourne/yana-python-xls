@@ -77,6 +77,13 @@ class Reader(BaseReader):
                     if self.col_i >= total_col:
                         break
                     req_col = filter.cell(self.row_i, self.col_i, self.row_j, self.col_j)
+                    if req_col:                  # 调整游标
+                        self.row_i += req_col[1]
+                        self.row_j += req_col[2]
+                        self.col_i += req_col[3]
+                        self.col_j += req_col[4]
+                        if req_col[0]:
+                            break
                     self.col_i += 1
                     self.col_j += 1
                 self.row_i += 1
@@ -102,6 +109,7 @@ class Filter(BaseFilter):             # 行处理的过滤器
         self.pending_row = (rdrowx,wtrowx)
 
     def cell(self, rdrowx, rdcolx, wtrowx, wtcolx, *args, **kwargs):
+        print rdrowx, rdcolx, wtrowx, wtcolx
         cell_type = self.rdsheet.cell(rdrowx, rdcolx).ctype
         """
         xlrd.XL_CELL_EMPTY,
@@ -122,19 +130,21 @@ class Filter(BaseFilter):             # 行处理的过滤器
                     control_type = req_ass['type']
                     control_data = req_ass.get('data')
                     if control_type == 'tr':
+                        print 'got in tr loop', control_data
                         """
                         1 本行不写  break 掉
                         2 调整写游标的row 减1
                         3 给循环标志位为True
                         """
                         temp, temp_vb = control_data
-                        loop_count = len(self.xljianja.render.get(temp_vb))
+                        loop_count = len(self.xljianja.render_vb.get(temp_vb))
                         self.xljianja.setbit(0, 1)          # 记录进入循环row状态
                         self.xljianja.setbit(2, loop_count) # 记录要循环几次
                         self.xljianja.setbit(4, loop_count) # 记录剩余
                         self.xljianja.tr_loop = rdrowx      # 用于计算循环体宽度
                         # self.next.cell(rdrowx, rdcolx, wtrowx, wtcolx, method='row_skip')
-                        return 1, 0, 0, -1, 0               # 是否break 四个游标的位移
+                        print self.xljianja.status
+                        return 1, 0, 0, -2, 0               # 是否break 四个游标的位移
                     elif control_type == 'tc':
                         """  这里不对tc处理，下个filter处理tc
                         1 循环体内本列不写 在else限制
@@ -168,8 +178,8 @@ class Filter(BaseFilter):             # 行处理的过滤器
                             self.xljianja.setbit(6, abs(loop_width))   # 设置宽度 下次游标经过返回到for下面那行
                         if self.xljianja.getbit(4) > 1:                # 仍在循环中
                             loop_width = self.xljianja.getbit(6)
-                            self.xljianja.setbit(4, self.xljianja.getbit(4)-1)
-                            return 0, -loop_width, 0, 0, 0             # 调整游标
+                            self.xljianja.setbit(4, int(self.xljianja.getbit(4))-1)
+                            return 0, -int(loop_width), 0, 0, 0             # 调整游标
                         else:
                             return 1, 0, 0, -1, 0
                     elif control_type == 'tcendfor':
@@ -183,12 +193,10 @@ class Filter(BaseFilter):             # 行处理的过滤器
                         else:
                             return 1, 0, 0, 0, -1
                     elif control_type == 'variable':
-                        print 'cell_value', cell_value, self.xljianja.render_vb, control_data
+                        print 'got into variable', cell_value
                         cell_value = self.xljianja.render_vb.get(control_data, '')
-                        print 'cell_value2', cell_value
                         if hasattr(self.xljianja, control_data):
                             cell_value = getattr(self.xljianja, control_data)
-                        print 'cell_value3', cell_value
                         self.next.cell(rdrowx, rdcolx, wtrowx, wtcolx, cell_value=cell_value, modify_value=True)
                     else:
                         self.next.cell(rdrowx, rdcolx, wtrowx, wtcolx)
@@ -221,10 +229,7 @@ class Filter2(BaseFilter):      # 列处理过滤器
 
     def cell(self,rdrowx,rdcolx,wtrowx,wtcolx, *args, **kwargs):
         # print 'self.total_col', self.total_col
-        if self.rdsheet.name == self.sheet_name:
-            self.next.cell(rdrowx, rdcolx, wtrowx, wtcolx)
-        else:
-            self.next.cell(rdrowx, rdcolx, wtrowx, wtcolx)
+        self.next.cell(rdrowx, rdcolx, wtrowx, wtcolx)
 
 
 class Writer(BaseWriter):
@@ -244,6 +249,7 @@ class Writer(BaseWriter):
 
         # print args
         if kwargs.get('modify_value'):
+            print 'kwargs',kwargs
             value_req = kwargs.get('cell_value')
             if isinstance(value_req, list):
                 cell_value, cell_type = value_req
@@ -321,9 +327,9 @@ class Writer(BaseWriter):
 
 if __name__ == '__main__':
     xl = XlsJinja.XlsJinja()
-    xl.render({'gaga': 111})
+    xl.render({'gaga': 111, 'vb': [{'a': 1, 'b': '2'}, {'a': '大范围', 'b': 'dfgre'}, {'a': 324, 'b': '的发个啥'}]})
     filename = 'test.xls'
-    process(Reader(0, 'test.xls'), Filter('test.xls', xl), Writer())
+    process(Reader(0, filename), Filter(filename, xl), Writer())
     os.rename(filename + ".new", 'new.xls')
     ## useage
     # xlsx insert
@@ -336,13 +342,13 @@ if __name__ == '__main__':
 
     # copy style
 
-    # copy_style('test.xls', [1, 3], [20, 9], '', sheet=0)
+    # copy_style('test.xls.old', [1, 3], [20, 9], '', sheet=0)
 
     # insert xls
 
 
     # other
-    # wb = xlrd.open_workbook('test.xls', on_demand=True)
+    # wb = xlrd.open_workbook('test.xls.old', on_demand=True)
     # wss = wb.
     # print wss
     # req = re.compile(r'(\\)')
