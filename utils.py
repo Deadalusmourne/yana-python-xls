@@ -78,9 +78,9 @@ class Reader(BaseReader):
                         break
                     req_col = filter.cell(self.row_i, self.col_i, self.row_j, self.col_j)
                     if req_col:                  # 调整游标
-                        self.row_i += req_col[1]
-                        self.row_j += req_col[2]
-                        self.col_i += req_col[3]
+                        self.row_i += req_col[1]          # 行
+                        self.col_i += req_col[2]
+                        self.row_j += req_col[3]          # 列
                         self.col_j += req_col[4]
                         if req_col[0]:
                             break
@@ -121,14 +121,15 @@ class Filter(BaseFilter):             # 行处理的过滤器
         xlrd.XL_CELL_BLANK
         """
         if cell_type == xlrd.XL_CELL_TEXT:
-            cell_value = self.rdsheet.cell(rdrowx, rdcolx).value
-            req_ass = XlsJinja.XlsJinja.assert_text(cell_value)
+            cell_value = self.rdsheet.cell(rdrowx, rdcolx).value    # 获取本单元格的值
+            req_ass = self.xljianja.assert_text(cell_value)     # 这里进行值解析 分析出是否循环，循环哪些值
             if req_ass:
                 if req_ass['error']:
                     raise MultipleIterationError(req_ass['error'])
                 else:
                     control_type = req_ass['type']
                     control_data = req_ass.get('data')
+                    loop_vb = req_ass.get('loop_vb')
                     if control_type == 'tr':
                         print 'got in tr loop', control_data
                         """
@@ -142,11 +143,11 @@ class Filter(BaseFilter):             # 行处理的过滤器
                         self.xljianja.setbit(2, loop_count) # 记录要循环几次
                         self.xljianja.setbit(4, loop_count) # 记录剩余
                         self.xljianja.tr_loop = rdrowx      # 用于计算循环体宽度
-                        # self.next.cell(rdrowx, rdcolx, wtrowx, wtcolx, method='row_skip')
-                        print self.xljianja.status
-                        return 1, 0, 0, -2, 0               # 是否break 四个游标的位移
+                        # 记录下 循环的变量 利于循环体内的值替换操作
+                        self.xljianja.tr_loop_temp_vb = control_data
+                        return 1, 0, 0, -1, 0               # 是否break 四个游标的位移
                     elif control_type == 'tc':
-                        """  这里不对tc处理，下个filter处理tc
+                        """ 
                         1 循环体内本列不写 在else限制
                         2 调整写游标col 减1
                         3 给循环标志位为True
@@ -157,7 +158,8 @@ class Filter(BaseFilter):             # 行处理的过滤器
                         self.xljianja.setbit(3, loop_count)
                         self.xljianja.setbit(5, loop_count)
                         self.xljianja.tc_loop = rdcolx
-                        # self.next.cell(rdrowx, rdcolx, wtrowx, wtcolx, method='col_skip')
+                        # 记录下 循环的变量 利于循环体内的值替换操作
+                        self.xljianja.tc_loop_temp_vb = control_data
                         return 0, 0, 0, 0, -1
                     elif control_type == 'set':
                         xl_dict = XlsJinja.XlsJinja.__dict__
@@ -194,9 +196,17 @@ class Filter(BaseFilter):             # 行处理的过滤器
                             return 1, 0, 0, 0, -1
                     elif control_type == 'variable':
                         print 'got into variable', cell_value
-                        cell_value = self.xljianja.render_vb.get(control_data, '')
-                        if hasattr(self.xljianja, control_data):
-                            cell_value = getattr(self.xljianja, control_data)
+                        print 'req_ass', req_ass
+                        cell_value_p = ''
+                        if loop_vb:
+                            cell_value_p = self.get_loop_result(req_ass)
+                        if not cell_value_p:
+                            cell_value = self.xljianja.render_vb.get(control_data, '')
+                            if hasattr(self.xljianja, control_data):         # 通过set设置的value值
+                                cell_value = getattr(self.xljianja, control_data)
+                        else:
+                            cell_value = cell_value_p
+                        # 判断循环体内的变量参数
                         self.next.cell(rdrowx, rdcolx, wtrowx, wtcolx, cell_value=cell_value, modify_value=True)
                     else:
                         self.next.cell(rdrowx, rdcolx, wtrowx, wtcolx)
@@ -205,6 +215,20 @@ class Filter(BaseFilter):             # 行处理的过滤器
         else:
             self.next.cell(rdrowx, rdcolx, wtrowx, wtcolx)
 
+    def get_loop_result(self, req_ass):        # 获取循环体内参数的值
+        control_data = req_ass.get('data')
+        loop_vb = req_ass.get('loop_vb')
+        tr_or_tc = req_ass.get('tr_or_tc')
+        if not tr_or_tc:
+            index = self.xljianja.getbit(2) - self.xljianja.getbit(4)
+        else:
+            index = self.xljianja.getbit(3) - self.xljianja.getbit(5)
+        loop_source_data = self.xljianja.render_vb.get(loop_vb)
+        try:
+            req = loop_source_data[index].get(control_data)
+        except IndexError:
+            req = ''
+        return req
 
     def sheet(self, rdsheet, wtsheet_name):
         self.rdsheet = rdsheet
@@ -262,7 +286,7 @@ class Writer(BaseWriter):
                 setattr(cell, 'value', value_req)
                 setattr(cell, 'ctype', xlrd.XL_CELL_NUMBER)
             else:
-                raise MultipleIterationError('%s data type error' % value_req)
+                raise MultipleIterationError('%s cell value encode error' % value_req)
         # setup column attributes if not already set
         if wtcolx not in self.wtcols and rdcolx in self.rdsheet.colinfo_map:
             rdcol = self.rdsheet.colinfo_map[rdcolx]
@@ -327,7 +351,7 @@ class Writer(BaseWriter):
 
 if __name__ == '__main__':
     xl = XlsJinja.XlsJinja()
-    xl.render({'gaga': 111, 'vb': [{'a': 1, 'b': '2'}, {'a': '大范围', 'b': 'dfgre'}, {'a': 324, 'b': '的发个啥'}]})
+    xl.render({'gaga': 111, 'vb': [{'a': 1, 'b': '2'}, {'a': u'大范围', 'b': 'dfgre'}, {'a': 324, 'b': u'的发个啥'}]})
     filename = 'test.xls'
     process(Reader(0, filename), Filter(filename, xl), Writer())
     os.rename(filename + ".new", 'new.xls')
