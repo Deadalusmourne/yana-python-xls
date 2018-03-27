@@ -18,13 +18,14 @@ from XlsJinja import MultipleIterationError
 
 class Reader(BaseReader):
 
-    def __init__(self, sheet_index, filename):
+    def __init__(self, sheet_index, filename, xljianjia):
         self.sheet_index = sheet_index
         self.filename = filename
         self.row_i = 0        # 读指针
         self.col_i = 0
         self.row_j = 0        # 写指针
         self.col_j = 0
+        self.xljianjia = xljianjia
 
     def get_filepaths(self):
         return [os.path.abspath(self.filename)]
@@ -35,8 +36,9 @@ class Reader(BaseReader):
                 xlrd.open_workbook(
                     path,
                     formatting_info=1,
-                    on_demand=False,
-                    ragged_rows=True),
+                    # on_demand=1,
+                    # ragged_rows=1
+                ),
                 os.path.split(path)[1]
             )
 
@@ -73,10 +75,11 @@ class Reader(BaseReader):
                 self.col_i = 0                         # 重置列游标为0
                 self.col_j = 0
                 while True:
-                    # print self.row_i, self.col_i, self.row_j, self.col_j, '|', total_col
+                    print self.row_i, self.col_i, self.row_j, self.col_j, '|', total_col
                     if self.col_i >= total_col:
                         break
                     req_col = filter.cell(self.row_i, self.col_i, self.row_j, self.col_j)
+                    print '||', req_col
                     if req_col:                  # 调整游标
                         self.row_i += req_col[1]          # 行
                         self.col_i += req_col[2]
@@ -109,7 +112,9 @@ class Filter(BaseFilter):             # 行处理的过滤器
         self.pending_row = (rdrowx,wtrowx)
 
     def cell(self, rdrowx, rdcolx, wtrowx, wtcolx, *args, **kwargs):
-        print rdrowx, rdcolx, wtrowx, wtcolx
+
+
+        # print rdrowx, rdcolx, wtrowx, wtcolx
         cell_type = self.rdsheet.cell(rdrowx, rdcolx).ctype
         """
         xlrd.XL_CELL_EMPTY,
@@ -131,13 +136,13 @@ class Filter(BaseFilter):             # 行处理的过滤器
                     control_data = req_ass.get('data')
                     loop_vb = req_ass.get('loop_vb')
                     if control_type == 'tr':
-                        print 'got in tr loop', control_data
                         """
                         1 本行不写  break 掉
                         2 调整写游标的row 减1
                         3 给循环标志位为True
                         """
                         temp, temp_vb = control_data
+                        print 'debug temp, temp_vb', temp, temp_vb
                         loop_count = len(self.xljianja.render_vb.get(temp_vb))
                         self.xljianja.setbit(0, 1)          # 记录进入循环row状态
                         self.xljianja.setbit(2, loop_count) # 记录要循环几次
@@ -181,8 +186,9 @@ class Filter(BaseFilter):             # 行处理的过滤器
                         if self.xljianja.getbit(4) > 1:                # 仍在循环中
                             loop_width = self.xljianja.getbit(6)
                             self.xljianja.setbit(4, int(self.xljianja.getbit(4))-1)
-                            return 0, -int(loop_width), 0, 0, 0             # 调整游标
+                            return 0, -int(loop_width), -1, 0, -1             # 调整游标
                         else:
+                            self.xljianja.setbit(0, 0)
                             return 1, 0, 0, -1, 0
                     elif control_type == 'tcendfor':
                         if self.xljianja.getbit(3) == self.xljianja.getbit(5):
@@ -193,10 +199,9 @@ class Filter(BaseFilter):             # 行处理的过滤器
                             self.xljianja.setbit(5, self.xljianja.getbit(5) - 1)
                             return 0, 0, -loop_width, 0, 0
                         else:
+                            self.xljianja.setbit(1, 0)
                             return 1, 0, 0, 0, -1
                     elif control_type == 'variable':
-                        print 'got into variable', cell_value
-                        print 'req_ass', req_ass
                         cell_value_p = ''
                         if loop_vb:
                             cell_value_p = self.get_loop_result(req_ass)
@@ -235,7 +240,6 @@ class Filter(BaseFilter):             # 行处理的过滤器
         self.next.sheet(rdsheet, wtsheet_name)
 
     def set_rdsheet(self,rdsheet):
-        print self.name, 'set_rdsheet', rdsheet
         self.next.sheet(rdsheet)
 
 
@@ -270,19 +274,18 @@ class Writer(BaseWriter):
         :param wtcolx: the index of the column to be written to in the current output sheet. 
         """
         cell = self.rdsheet.cell(rdrowx, rdcolx)
-
+        self.row(rdrowx, wtrowx)                    # 源basewriter中没有
         # print args
         if kwargs.get('modify_value'):
-            print 'kwargs',kwargs
             value_req = kwargs.get('cell_value')
             if isinstance(value_req, list):
                 cell_value, cell_type = value_req
                 setattr(cell, 'value', cell_value)
                 setattr(cell, 'ctype', cell_type)
-            elif isinstance(value_req,unicode):
+            elif isinstance(value_req, (unicode, str)):
                 setattr(cell, 'value', value_req)
                 setattr(cell, 'ctype', xlrd.XL_CELL_TEXT)
-            elif isinstance(value_req, int):
+            elif isinstance(value_req, (int, float)):
                 setattr(cell, 'value', value_req)
                 setattr(cell, 'ctype', xlrd.XL_CELL_NUMBER)
             else:
@@ -297,6 +300,8 @@ class Writer(BaseWriter):
             wtcol.level = rdcol.outline_level
             wtcol.collapsed = rdcol.collapsed
             self.wtcols.add(wtcolx)
+        #
+
         # copy cell
         cty = cell.ctype
         if cty == xlrd.XL_CELL_EMPTY:
@@ -351,9 +356,64 @@ class Writer(BaseWriter):
 
 if __name__ == '__main__':
     xl = XlsJinja.XlsJinja()
-    xl.render({'gaga': 111, 'vb': [{'a': 1, 'b': '2'}, {'a': u'大范围', 'b': 'dfgre'}, {'a': 324, 'b': u'的发个啥'}]})
-    filename = 'test.xls'
-    process(Reader(0, filename), Filter(filename, xl), Writer())
+    # xl.render({'gaga': 111, 'vb': [{'a': 1, 'b': '2'}, {'a': u'大范围', 'b': 'dfgre'}, {'a': 324, 'b': u'的发个啥'}]})
+    item_data = {
+        "father_data": [
+            {
+                "a": u'f1代达罗斯之殇',
+                "b": u'水晶剑、恶魔刀锋',
+                "money": 5320,
+                "function": u'+80ATK',
+                "passive": u'30%概率造成235%暴击伤害',
+                "nickname": u'暴雪弩炮',
+            },
+            {
+                "a": u'f2代达罗斯之殇',
+                "b": u'水晶剑、恶魔刀锋',
+                "money": 5320,
+                "function": u'+80ATK',
+                "passive": u'30%概率造成235%暴击伤害',
+                "nickname": u'暴雪弩炮',
+            },
+            {
+                "a": u'f3代达罗斯之殇',
+                "b": u'水晶剑、恶魔刀锋',
+                "money": 5320,
+                "function": u'+80ATK',
+                "passive": u'30%概率造成235%暴击伤害',
+                "nickname": u'暴雪弩炮',
+            },
+        ],
+        "son_data": [
+            {
+                "a": u's1代达罗斯之殇',
+                "b": u'水晶剑、恶魔刀锋',
+                "money": 5320,
+                "function": u'+80ATK',
+                "passive": u'30%概率造成235%暴击伤害',
+                "nickname": u'暴雪弩炮',
+            },
+            {
+                "a": u's2代达罗斯之殇',
+                "b": u'水晶剑、恶魔刀锋',
+                "money": 5320,
+                "function": u'+80ATK',
+                "passive": u'30%概率造成235%暴击伤害',
+                "nickname": u'暴雪弩炮',
+            },
+            {
+                "a": u's3代达罗斯之殇',
+                "b": u'水晶剑、恶魔刀锋',
+                "money": 5320,
+                "function": u'+80ATK',
+                "passive": u'30%概率造成235%暴击伤害',
+                "nickname": u'暴雪弩炮',
+            },
+        ]
+    }
+    xl.render(item_data)
+    filename = 'al_test.xls'
+    process(Reader(0, filename, xl), Filter(filename, xl), Writer())
     os.rename(filename + ".new", 'new.xls')
     ## useage
     # xlsx insert
